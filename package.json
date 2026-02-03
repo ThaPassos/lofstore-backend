@@ -1,0 +1,9 @@
+{
+  "name": "lofstore-backend",
+  "version": "1.0.0",
+  "description": "Backend pagamentos LofStore",
+  "dependencies": {
+    "mercadopago": "^1.5.17",
+    "firebase-admin": "^12.0.0"
+  }
+}

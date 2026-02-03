@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/criar-pagamento",
+      "dest": "/api/criar-pagamento.js",
+      "methods": ["POST", "OPTIONS"]
+    },
+    {
+      "src": "/webhook",
+      "dest": "/api/webhook.js",
+      "methods": ["POST"]
+    },
+    {
+      "src": "/status/(.*)",
+      "dest": "/api/status.js",
+      "methods": ["GET"]
+    }
+  ]
+}
+
