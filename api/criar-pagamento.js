@@ -31,7 +31,7 @@ mercadopago.configure({
 });
 
 module.exports = async (req, res) => {
-  // CORS MELHORADO
+  // CORS
   const allowedOrigins = [
     'https://lofstore.com.br',
     'http://localhost:3000',
@@ -42,13 +42,14 @@ module.exports = async (req, res) => {
   
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
   }
   
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
 
-  // Responde OPTIONS imediatamente
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -60,18 +61,13 @@ module.exports = async (req, res) => {
   try {
     const { pedidoId, itens, total, cliente } = req.body;
 
-    console.log('📦 Criando pagamento:', pedidoId);
+    console.log('📦 Criando pagamento para pedido:', pedidoId);
 
     // Validações
     if (!pedidoId || !itens || !cliente) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Dados incompletos',
-        detalhes: {
-          pedidoId: !!pedidoId,
-          itens: !!itens,
-          cliente: !!cliente
-        }
+        message: 'Dados incompletos'
       });
     }
 
@@ -81,6 +77,13 @@ module.exports = async (req, res) => {
         message: 'Carrinho vazio' 
       });
     }
+
+    // Formata telefone corretamente (SOMENTE NÚMEROS)
+    const telefoneNumeros = String(cliente.telefone || '').replace(/\D/g, '');
+    const telefoneFormatado = telefoneNumeros.length >= 10 ? telefoneNumeros : '11999999999';
+
+    console.log('Telefone original:', cliente.telefone);
+    console.log('Telefone formatado:', telefoneFormatado);
 
     // Mapeia itens para o formato do Mercado Pago
     const itensMercadoPago = itens.map(item => ({
@@ -96,8 +99,9 @@ module.exports = async (req, res) => {
       payer: {
         name: cliente.nome,
         email: cliente.email,
-        phone: { 
-          number: cliente.telefone?.replace(/\D/g, '') || '' 
+        phone: {
+          area_code: telefoneFormatado.substring(0, 2), // DDD
+          number: Number(telefoneFormatado.substring(2)) // Número como INTEGER
         }
       },
       external_reference: pedidoId,
@@ -117,7 +121,8 @@ module.exports = async (req, res) => {
       }
     };
 
-    console.log('Criando preferência no Mercado Pago...');
+    console.log('📞 Preferência:', JSON.stringify(preference, null, 2));
+
     const response = await mercadopago.preferences.create(preference);
 
     // Atualiza pedido no Firebase
@@ -128,7 +133,7 @@ module.exports = async (req, res) => {
       atualizadoEm: new Date().toISOString()
     });
 
-    console.log('✅ Pagamento criado com sucesso!');
+    console.log('✅ Pagamento criado!');
 
     res.json({
       success: true,
@@ -137,7 +142,7 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro ao criar pagamento:', error);
+    console.error('❌ Erro:', error);
     res.status(500).json({ 
       success: false, 
       message: error.message,
