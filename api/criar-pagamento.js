@@ -31,11 +31,24 @@ mercadopago.configure({
 });
 
 module.exports = async (req, res) => {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS MELHORADO
+  const allowedOrigins = [
+    'https://lofstore.com.br',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000'
+  ];
+  
+  const origin = req.headers.origin;
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
 
+  // Responde OPTIONS imediatamente
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -49,10 +62,27 @@ module.exports = async (req, res) => {
 
     console.log('📦 Criando pagamento:', pedidoId);
 
+    // Validações
     if (!pedidoId || !itens || !cliente) {
-      return res.status(400).json({ success: false, message: 'Dados incompletos' });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Dados incompletos',
+        detalhes: {
+          pedidoId: !!pedidoId,
+          itens: !!itens,
+          cliente: !!cliente
+        }
+      });
     }
 
+    if (!Array.isArray(itens) || itens.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Carrinho vazio' 
+      });
+    }
+
+    // Mapeia itens para o formato do Mercado Pago
     const itensMercadoPago = itens.map(item => ({
       title: item.nome,
       unit_price: Number(item.preco),
@@ -60,12 +90,15 @@ module.exports = async (req, res) => {
       currency_id: 'BRL'
     }));
 
+    // Cria preferência de pagamento
     const preference = {
       items: itensMercadoPago,
       payer: {
         name: cliente.nome,
         email: cliente.email,
-        phone: { number: cliente.telefone?.replace(/\D/g, '') || '' }
+        phone: { 
+          number: cliente.telefone?.replace(/\D/g, '') || '' 
+        }
       },
       external_reference: pedidoId,
       back_urls: {
@@ -75,12 +108,19 @@ module.exports = async (req, res) => {
       },
       auto_return: 'approved',
       notification_url: `${process.env.BACKEND_URL}/webhook`,
-      payment_methods: { installments: 12 },
-      metadata: { pedido_id: pedidoId, cliente_email: cliente.email }
+      payment_methods: { 
+        installments: 12 
+      },
+      metadata: { 
+        pedido_id: pedidoId, 
+        cliente_email: cliente.email 
+      }
     };
 
+    console.log('Criando preferência no Mercado Pago...');
     const response = await mercadopago.preferences.create(preference);
 
+    // Atualiza pedido no Firebase
     await db.collection('pedidos').doc(pedidoId).update({
       mercadoPagoId: response.body.id,
       linkPagamento: response.body.init_point,
@@ -88,7 +128,7 @@ module.exports = async (req, res) => {
       atualizadoEm: new Date().toISOString()
     });
 
-    console.log('Pagamento criado!');
+    console.log('✅ Pagamento criado com sucesso!');
 
     res.json({
       success: true,
@@ -97,7 +137,11 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erro:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error('❌ Erro ao criar pagamento:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message,
+      detalhes: error.stack
+    });
   }
 };
