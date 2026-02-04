@@ -2,30 +2,22 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/**/*.js",
+      "src": "api/*.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/criar-pagamento",
-      "dest": "/api/criar-pagamento.js",
-      "methods": ["POST", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization"
-      }
+      "dest": "/api/criar-pagamento.js"
     },
     {
       "src": "/webhook",
-      "dest": "/api/webhook.js",
-      "methods": ["POST"]
+      "dest": "/api/webhook.js"
     },
     {
       "src": "/status/(.*)",
-      "dest": "/api/status.js",
-      "methods": ["GET"]
+      "dest": "/api/status.js"
     }
   ]
 }

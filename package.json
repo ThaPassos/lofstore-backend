@@ -2,6 +2,7 @@
   "name": "lofstore-backend",
   "version": "1.0.0",
   "description": "Backend pagamentos LofStore",
+  "main": "api/criar-pagamento.js",
   "dependencies": {
     "mercadopago": "^1.5.17",
     "firebase-admin": "^12.0.0"
