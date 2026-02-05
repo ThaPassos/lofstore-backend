@@ -103,10 +103,10 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
     // =================== 2️⃣ EMAIL PARA O ADMIN ===================
     const dadosEmailAdmin = {
       // Campos do template EmailJS
-      to_email: 'fabunio@gmail.com', // Email do admin
+      to_email: 'fabunio@gmail.com', 
       to_name: 'Admin LofStore',
       from_name: 'Sistema LofStore',
-      reply_to: pedido.cliente.email, // Para responder direto ao cliente
+      reply_to: pedido.cliente.email, 
       
       // Tipo de notificação
       tipo_notificacao: '🔔 NOVO PAGAMENTO APROVADO',
