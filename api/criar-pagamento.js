@@ -61,7 +61,7 @@ module.exports = async (req, res) => {
   try {
     const { pedidoId, itens, total, cliente } = req.body;
 
-    console.log('📦 Criando pagamento para pedido:', pedidoId);
+    console.log('Criando pagamento para pedido:', pedidoId);
 
     // Validações
     if (!pedidoId || !itens || !cliente) {
@@ -121,7 +121,7 @@ module.exports = async (req, res) => {
       }
     };
 
-    console.log('📞 Preferência:', JSON.stringify(preference, null, 2));
+    console.log('Preferência:', JSON.stringify(preference, null, 2));
 
     const response = await mercadopago.preferences.create(preference);
 
@@ -133,7 +133,7 @@ module.exports = async (req, res) => {
       atualizadoEm: new Date().toISOString()
     });
 
-    console.log('✅ Pagamento criado!');
+    console.log('Pagamento criado!');
 
     res.json({
       success: true,
@@ -142,7 +142,7 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro:', error);
+    console.error('Erro:', error);
     res.status(500).json({ 
       success: false, 
       message: error.message,

@@ -23,10 +23,9 @@ mercadopago.configure({
   access_token: process.env.MP_ACCESS_TOKEN
 });
 
-// =================== FUNÇÃO PARA ENVIAR EMAILS VIA EMAILJS ===================
 async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
   try {
-    console.log('📧 Preparando envio de emails via EmailJS...');
+    console.log('Preparando envio de emails via EmailJS...');
     
     const dataFormatada = new Date(pedido.criadoEm).toLocaleDateString('pt-BR', {
       day: '2-digit',
@@ -49,7 +48,6 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       </tr>
     `).join('');
 
-    // =================== 1️⃣ EMAIL PARA O CLIENTE ===================
     const dadosEmailCliente = {
       // Campos do template EmailJS
       to_email: pedido.cliente.email,
@@ -61,7 +59,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       pedido_numero: `#${pedidoId.substring(0, 8)}`,
       pedido_id_completo: pedidoId,
       pedido_data: dataFormatada,
-      pedido_status: '✓ PAGO',
+      pedido_status: 'PAGO',
       pedido_total: `R$ ${pedido.total.toFixed(2)}`,
       
       // Produtos (versão texto para fallback)
@@ -100,16 +98,15 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       link_instagram: 'https://www.instagram.com/lofstore_outlet/'
     };
 
-    // =================== 2️⃣ EMAIL PARA O ADMIN ===================
     const dadosEmailAdmin = {
       // Campos do template EmailJS
-      to_email: 'fabunio@gmail.com', 
+      to_email: 'thafinhapassos@gmail.com', 
       to_name: 'Admin LofStore',
       from_name: 'Sistema LofStore',
       reply_to: pedido.cliente.email, 
       
       // Tipo de notificação
-      tipo_notificacao: '🔔 NOVO PAGAMENTO APROVADO',
+      tipo_notificacao: 'NOVO PAGAMENTO APROVADO',
       
       // Dados do pedido
       pedido_numero: `#${pedidoId.substring(0, 8)}`,
@@ -151,7 +148,6 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       acao_necessaria: 'Prepare o pedido para envio e atualize o status!'
     };
 
-    // =================== ENVIA OS EMAILS VIA EMAILJS ===================
     
     const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID || 'service_k85ya1a';
     const EMAILJS_TEMPLATE_CLIENTE = process.env.EMAILJS_TEMPLATE_CLIENTE || 'template_jjxc4sr';
@@ -177,7 +173,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       throw new Error(`Erro ao enviar email para cliente: ${errorText}`);
     }
 
-    console.log('✅ Email enviado para o cliente:', pedido.cliente.email);
+    console.log('Email enviado para o cliente:', pedido.cliente.email);
 
     // Email para o Admin
     const responseAdmin = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
@@ -198,12 +194,12 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       throw new Error(`Erro ao enviar email para admin: ${errorText}`);
     }
 
-    console.log('✅ Email enviado para o admin: fabunio@gmail.com');
+    console.log('Email enviado para o admin: fabunio@gmail.com');
 
     return { success: true, message: 'Emails enviados com sucesso!' };
 
   } catch (error) {
-    console.error('❌ Erro ao enviar emails:', error);
+    console.error('Erro ao enviar emails:', error);
     return { success: false, message: error.message };
   }
 }
@@ -228,19 +224,19 @@ module.exports = async (req, res) => {
   try {
     const { type, data } = req.body;
 
-    console.log('📦 Tipo de notificação:', type);
-    console.log('📋 Dados:', JSON.stringify(data, null, 2));
+    console.log('Tipo de notificação:', type);
+    console.log('Dados:', JSON.stringify(data, null, 2));
 
     if (type === 'payment') {
       const pagamentoId = data.id;
       
-      console.log('💳 Consultando pagamento no Mercado Pago:', pagamentoId);
+      console.log('Consultando pagamento no Mercado Pago:', pagamentoId);
       const pagamento = await mercadopago.payment.findById(pagamentoId);
       
       const pedidoId = pagamento.body.external_reference;
       const status = pagamento.body.status;
 
-      console.log(`✅ Pagamento ${pagamentoId} - Status: ${status} - Pedido: ${pedidoId}`);
+      console.log(`Pagamento ${pagamentoId} - Status: ${status} - Pedido: ${pedidoId}`);
 
       // Define status do pedido
       let statusPedido;
@@ -260,17 +256,15 @@ module.exports = async (req, res) => {
           statusPedido = 'aguardando';
       }
 
-      // Busca dados completos do pedido no Firebase
       const pedidoDoc = await db.collection('pedidos').doc(pedidoId).get();
       
       if (!pedidoDoc.exists) {
-        console.error('❌ Pedido não encontrado:', pedidoId);
+        console.error('Pedido não encontrado:', pedidoId);
         return res.status(404).json({ error: 'Pedido não encontrado' });
       }
 
       const pedidoDados = pedidoDoc.data();
 
-      // Atualiza status no Firebase
       await db.collection('pedidos').doc(pedidoId).update({
         statusPagamento: statusPedido,
         mercadoPagoStatus: status,
@@ -284,16 +278,15 @@ module.exports = async (req, res) => {
         }
       });
 
-      console.log(`✅ Pedido ${pedidoId} atualizado no Firebase: ${statusPedido}`);
+      console.log(`Pedido ${pedidoId} atualizado no Firebase: ${statusPedido}`);
 
-      // =================== SE FOI APROVADO, ENVIA EMAILS ===================
       if (status === 'approved') {
-        console.log('💰 Pagamento APROVADO! Enviando notificações por email...');
+        console.log('Pagamento APROVADO! Enviando notificações por email...');
         
         const resultadoEmail = await enviarEmailsPagamentoAprovado(pedidoDados, pedidoId);
         
         if (resultadoEmail.success) {
-          console.log('🎉 Emails enviados com sucesso!');
+          console.log('Emails enviados com sucesso!');
           
           // Registra envio no Firebase
           await db.collection('pedidos').doc(pedidoId).update({
@@ -301,17 +294,17 @@ module.exports = async (req, res) => {
             dataEnvioEmails: new Date().toISOString()
           });
         } else {
-          console.error('⚠️ Erro ao enviar emails:', resultadoEmail.message);
+          console.error('Erro ao enviar emails:', resultadoEmail.message);
         }
       } else {
-        console.log(`ℹ️ Status "${status}" - Emails não enviados (apenas em "approved")`);
+        console.log(`Status "${status}" - Emails não enviados (apenas em "approved")`);
       }
     }
 
     res.status(200).json({ success: true, message: 'Webhook processado' });
 
   } catch (error) {
-    console.error('❌ Erro no webhook:', error);
+    console.error('Erro no webhook:', error);
     console.error('Stack:', error.stack);
     res.status(500).json({ 
       success: false, 
