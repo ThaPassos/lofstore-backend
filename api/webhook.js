@@ -52,7 +52,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       to_email: pedido.cliente.email,
       to_name: pedido.cliente.nome,
       from_name: 'LofStore',
-      reply_to: 'thafinhapassos@gmail.com',
+      reply_to: 'fbrunosp10@gmail.com',
       
       // Dados do pedido
       pedido_numero: `#${pedidoId.substring(0, 8)}`,
@@ -98,7 +98,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
     };
 
     const dadosEmailAdmin = {
-      to_email: 'thafinhapassos@gmail.com', 
+      to_email: 'fbrunosp10@gmail.com', 
       to_name: 'Admin LofStore',
       from_name: 'Sistema LofStore',
       reply_to: pedido.cliente.email, 
@@ -192,7 +192,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       throw new Error(`Erro ao enviar email para admin: ${errorText}`);
     }
 
-    console.log('Email enviado para o admin: thafinhapassos@gmail.com');
+    console.log('Email enviado para o admin: fbrunosp10@gmail.com');
 
     return { success: true, message: 'Emails enviados com sucesso!' };
 
