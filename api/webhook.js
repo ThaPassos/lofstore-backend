@@ -52,7 +52,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
       to_email: pedido.cliente.email,
       to_name: pedido.cliente.nome,
       from_name: 'LofStore',
-      reply_to: 'fbrunosp10@gmail.com',
+      reply_to: 'thafinhapassos@gmail.com',
       
       // Dados do pedido
       pedido_numero: `#${pedidoId.substring(0, 8)}`,
@@ -98,7 +98,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
     };
 
     const dadosEmailAdmin = {
-      to_email: 'fbrunosp10@gmail.com', 
+      to_email: 'thafinhapassos@gmail.com', 
       to_name: 'Admin LofStore',
       from_name: 'Sistema LofStore',
       reply_to: pedido.cliente.email, 
