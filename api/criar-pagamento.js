@@ -106,7 +106,7 @@ module.exports = async (req, res) => {
       },
       external_reference: pedidoId,
       back_urls: {
-        success: `${process.env.FRONTEND_URL}/confirmacao-pedido.html`,
+        success: `${process.env.FRONTEND_URL}/pagamento-sucesso.html`,
         failure: `${process.env.FRONTEND_URL}/pagamento-falha.html`,
         pending: `${process.env.FRONTEND_URL}/pagamento-pendente.html`
       },
