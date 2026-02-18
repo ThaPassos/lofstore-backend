@@ -100,13 +100,13 @@ module.exports = async (req, res) => {
         name: cliente.nome,
         email: cliente.email,
         phone: {
-          area_code: telefoneFormatado.substring(0, 2), // DDD
-          number: Number(telefoneFormatado.substring(2)) // Número como INTEGER
+          area_code: telefoneFormatado.substring(0, 2),
+          number: Number(telefoneFormatado.substring(2))
         }
       },
       external_reference: pedidoId,
       back_urls: {
-        success: `${process.env.FRONTEND_URL}/pagamento-sucesso.html?pedido=${pedidoId}`,
+        success: `${process.env.FRONTEND_URL}/confirmacao-pedido.html`,
         failure: `${process.env.FRONTEND_URL}/pagamento-falha.html`,
         pending: `${process.env.FRONTEND_URL}/pagamento-pendente.html`
       },
