@@ -26,81 +26,84 @@ mercadopago.configure({
   access_token: process.env.MP_ACCESS_TOKEN
 });
 
-// =================== NODEMAILER (Gmail) ===================
-// Usa uma "Senha de App" do Google (não a senha normal da conta).
-// Para gerar: Google Account → Segurança → Verificação em 2 etapas → Senhas de app
+// =================== NODEMAILER ===================
 function criarTransporter() {
   return nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: process.env.GMAIL_USER,   // ex: seuemail@gmail.com
-      pass: process.env.GMAIL_PASS    // Senha de App gerada no Google
-    }
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_PASS
+    },
+    pool: false,
+    maxConnections: 1
   });
 }
 
 // =================== ENVIO DE E-MAILS ===================
 async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
+  console.log('📧 Iniciando envio de e-mails...');
+  console.log('   → Cliente:', pedido.cliente.email);
+  console.log('   → Admin:', process.env.ADMIN_EMAIL || 'thafinhapassos@gmail.com');
+
+  const transporter = criarTransporter();
+
+  // Verifica conexão com Gmail antes de enviar
   try {
-    console.log('📧 Preparando envio de e-mails via Nodemailer...');
+    await transporter.verify();
+    console.log('✅ Conexão com Gmail OK');
+  } catch (verifyError) {
+    console.error('❌ Falha na conexão com Gmail:', verifyError.message);
+    return { success: false, message: verifyError.message };
+  }
 
-    const transporter = criarTransporter();
+  const dataFormatada = new Date(pedido.criadoEm).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 
-    const dataFormatada = new Date(pedido.criadoEm).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+  const numeroPedido = pedidoId.substring(0, 8).toUpperCase();
 
-    const numeroPedido = pedidoId.substring(0, 8).toUpperCase();
+  const produtosHTML = pedido.itens.map(item => `
+    <tr>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #f0f0f0;">${item.nome}</td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: center;">${item.quantidade || 1}</td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: right; color: #b52d1e; font-weight: 600;">
+        R$ ${(item.preco * (item.quantidade || 1)).toFixed(2)}
+      </td>
+    </tr>
+  `).join('');
 
-    // Monta tabela de produtos em HTML
-    const produtosHTML = pedido.itens.map(item => `
-      <tr>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #f0f0f0;">${item.nome}</td>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: center;">${item.quantidade || 1}</td>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: right; color: #b52d1e; font-weight: 600;">
-          R$ ${(item.preco * (item.quantidade || 1)).toFixed(2)}
-        </td>
-      </tr>
-    `).join('');
-
-    // ── E-MAIL PARA O CLIENTE ──────────────────────────────
-    const htmlCliente = `
+  // ── HTML E-MAIL CLIENTE ───────────────────────────────
+  const htmlCliente = `
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#f8f3f3;font-family:'Raleway',Arial,sans-serif;">
   <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
-
-    <!-- Cabeçalho -->
     <div style="background:#b52d1e;padding:30px 40px;text-align:center;">
       <h1 style="color:#fff;margin:0;font-size:26px;font-weight:700;">LofStore</h1>
       <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Perfumes exclusivos</p>
     </div>
-
-    <!-- Corpo -->
     <div style="padding:40px;">
       <h2 style="color:#b52d1e;margin-top:0;">✅ Pagamento Confirmado!</h2>
       <p style="color:#444;font-size:15px;">Olá, <strong>${pedido.cliente.nome}</strong>!</p>
       <p style="color:#444;font-size:15px;">Seu pagamento foi aprovado e seu pedido já está sendo preparado.</p>
 
-      <!-- Resumo do pedido -->
       <div style="background:#f9f9f9;border-radius:8px;padding:20px;margin:25px 0;">
         <p style="margin:0 0 5px;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:1px;">Pedido</p>
         <p style="margin:0;font-size:20px;font-weight:700;color:#b52d1e;">#${numeroPedido}</p>
         <p style="margin:5px 0 0;font-size:13px;color:#666;">${dataFormatada}</p>
       </div>
 
-      <!-- Tabela de itens -->
       <table style="width:100%;border-collapse:collapse;font-size:14px;">
         <thead>
           <tr style="background:#b52d1e;color:#fff;">
-            <th style="padding:12px;text-align:left;border-radius:6px 0 0 0;">Produto</th>
+            <th style="padding:12px;text-align:left;">Produto</th>
             <th style="padding:12px;text-align:center;">Qtd</th>
-            <th style="padding:12px;text-align:right;border-radius:0 6px 0 0;">Valor</th>
+            <th style="padding:12px;text-align:right;">Valor</th>
           </tr>
         </thead>
         <tbody>${produtosHTML}</tbody>
@@ -114,16 +117,15 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
         </tfoot>
       </table>
 
-      <!-- Endereço de entrega -->
       <div style="margin:25px 0;padding:20px;border-left:4px solid #b52d1e;background:#fff9f8;border-radius:0 8px 8px 0;">
         <p style="margin:0 0 8px;font-weight:700;color:#333;">📦 Endereço de entrega</p>
-        <p style="margin:0;color:#555;font-size:14px;">${pedido.cliente.endereco}</p>
+        <p style="margin:0;color:#555;font-size:14px;">${pedido.cliente.endereco || 'Não informado'}</p>
         <p style="margin:5px 0 0;color:#555;font-size:14px;">Telefone: ${pedido.cliente.telefone}</p>
       </div>
 
       <p style="color:#555;font-size:14px;">Em caso de dúvidas, entre em contato conosco:</p>
-      <div style="display:flex;gap:15px;margin:15px 0;">
-        <a href="https://wa.me/5511985242367" style="display:inline-block;background:#25D366;color:#fff;padding:10px 20px;border-radius:25px;text-decoration:none;font-weight:600;font-size:13px;">WhatsApp</a>
+      <div style="margin:15px 0;">
+        <a href="https://wa.me/5511985242367" style="display:inline-block;background:#25D366;color:#fff;padding:10px 20px;border-radius:25px;text-decoration:none;font-weight:600;font-size:13px;margin-right:10px;">WhatsApp</a>
         <a href="https://www.instagram.com/lofstore_outlet/" style="display:inline-block;background:#E1306C;color:#fff;padding:10px 20px;border-radius:25px;text-decoration:none;font-weight:600;font-size:13px;">Instagram</a>
       </div>
 
@@ -131,8 +133,6 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
         Ver Meus Pedidos
       </a>
     </div>
-
-    <!-- Rodapé -->
     <div style="background:#f8f3f3;padding:20px 40px;text-align:center;border-top:1px solid #eee;">
       <p style="margin:0;font-size:12px;color:#999;">© 2024 LofStore · Todos os direitos reservados</p>
     </div>
@@ -140,8 +140,8 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
 </body>
 </html>`;
 
-    // ── E-MAIL PARA O ADMIN ──────────────────────────────
-    const htmlAdmin = `
+  // ── HTML E-MAIL ADMIN ─────────────────────────────────
+  const htmlAdmin = `
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="UTF-8"></head>
@@ -160,7 +160,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
         <tr><td style="padding:6px 0;width:130px;"><strong>Nome:</strong></td><td>${pedido.cliente.nome}</td></tr>
         <tr><td style="padding:6px 0;"><strong>E-mail:</strong></td><td>${pedido.cliente.email}</td></tr>
         <tr><td style="padding:6px 0;"><strong>Telefone:</strong></td><td>${pedido.cliente.telefone}</td></tr>
-        <tr><td style="padding:6px 0;"><strong>Endereço:</strong></td><td>${pedido.cliente.endereco}</td></tr>
+        <tr><td style="padding:6px 0;"><strong>Endereço:</strong></td><td>${pedido.cliente.endereco || 'Não informado'}</td></tr>
       </table>
 
       <h3 style="color:#333;border-bottom:2px solid #eee;padding-bottom:8px;margin-top:25px;">📦 Produtos</h3>
@@ -191,29 +191,48 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
 </body>
 </html>`;
 
-    // ── Envio simultâneo ──────────────────────────────────
-    await Promise.all([
-      transporter.sendMail({
-        from: `"LofStore" <${process.env.GMAIL_USER}>`,
-        to: pedido.cliente.email,
-        subject: `✅ Pedido #${numeroPedido} confirmado — LofStore`,
-        html: htmlCliente
-      }),
-      transporter.sendMail({
-        from: `"Sistema LofStore" <${process.env.GMAIL_USER}>`,
-        to: process.env.ADMIN_EMAIL || 'thafinhapassos@gmail.com',
-        subject: `🛒 Novo pedido aprovado #${numeroPedido}`,
-        html: htmlAdmin
-      })
-    ]);
+  // ── ENVIA OS E-MAILS SEPARADAMENTE ──────────────────────
+  let emailClienteOk = false;
+  let emailAdminOk = false;
 
-    console.log('✅ E-mails enviados com sucesso para cliente e admin!');
-    return { success: true };
-
-  } catch (error) {
-    console.error('❌ Erro ao enviar e-mails:', error);
-    return { success: false, message: error.message };
+  // 1️⃣ E-mail para o CLIENTE
+  try {
+    console.log('📤 Enviando e-mail para cliente:', pedido.cliente.email);
+    const infoCliente = await transporter.sendMail({
+      from: `"LofStore" <${process.env.GMAIL_USER}>`,
+      to: pedido.cliente.email,
+      subject: `✅ Pedido #${numeroPedido} confirmado — LofStore`,
+      html: htmlCliente
+    });
+    console.log('✅ E-mail do CLIENTE enviado! MessageId:', infoCliente.messageId);
+    emailClienteOk = true;
+  } catch (erroCliente) {
+    console.error('❌ ERRO ao enviar e-mail para CLIENTE:', erroCliente.message);
+    console.error('   Código do erro:', erroCliente.code);
+    console.error('   Destinatário:', pedido.cliente.email);
   }
+
+  // Aguarda 2 segundos entre os envios
+  await new Promise(r => setTimeout(r, 2000));
+
+  // 2️⃣ E-mail para o ADMIN
+  try {
+    const adminEmail = process.env.ADMIN_EMAIL || 'thafinhapassos@gmail.com';
+    console.log('📤 Enviando e-mail para admin:', adminEmail);
+    const infoAdmin = await transporter.sendMail({
+      from: `"Sistema LofStore" <${process.env.GMAIL_USER}>`,
+      to: adminEmail,
+      subject: `🛒 Novo pedido aprovado #${numeroPedido}`,
+      html: htmlAdmin
+    });
+    console.log('✅ E-mail do ADMIN enviado! MessageId:', infoAdmin.messageId);
+    emailAdminOk = true;
+  } catch (erroAdmin) {
+    console.error('❌ ERRO ao enviar e-mail para ADMIN:', erroAdmin.message);
+  }
+
+  console.log(`📊 Resultado final: cliente=${emailClienteOk} | admin=${emailAdminOk}`);
+  return { success: emailClienteOk || emailAdminOk, emailClienteOk, emailAdminOk };
 }
 
 // =================== WEBHOOK PRINCIPAL ===================
@@ -228,14 +247,12 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido' });
 
   try {
-    // O Vercel já parseia o body em req.body para application/json
     const body = req.body || {};
     const { type, data } = body;
 
     console.log('Tipo:', type);
     console.log('Dados:', JSON.stringify(data));
 
-    // O MP pode enviar notificações com formatos ligeiramente diferentes
     const pagamentoId = data?.id || req.query?.['data.id'];
 
     if (type !== 'payment' || !pagamentoId) {
@@ -256,7 +273,6 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, message: 'Sem pedidoId' });
     }
 
-    // Mapeia status MP → status interno
     const statusMap = {
       approved: 'pago',
       pending: 'pendente',
@@ -266,7 +282,6 @@ module.exports = async (req, res) => {
     };
     const statusPedido = statusMap[status] || 'aguardando';
 
-    // Busca pedido no Firestore
     const pedidoDoc = await db.collection('pedidos').doc(pedidoId).get();
     if (!pedidoDoc.exists) {
       console.error('Pedido não encontrado:', pedidoId);
@@ -275,7 +290,6 @@ module.exports = async (req, res) => {
 
     const pedidoDados = pedidoDoc.data();
 
-    // Atualiza status no Firestore
     await db.collection('pedidos').doc(pedidoId).update({
       statusPagamento: statusPedido,
       mercadoPagoStatus: status,
@@ -291,16 +305,16 @@ module.exports = async (req, res) => {
 
     console.log(`Pedido ${pedidoId} → ${statusPedido}`);
 
-    // Só envia e-mail quando aprovado e se ainda não enviou
     if (status === 'approved' && !pedidoDados.emailsEnviados) {
       const resultado = await enviarEmailsPagamentoAprovado(pedidoDados, pedidoId);
 
-      if (resultado.success) {
-        await db.collection('pedidos').doc(pedidoId).update({
-          emailsEnviados: true,
-          dataEnvioEmails: new Date().toISOString()
-        });
-      }
+      // Salva resultado detalhado no Firebase para diagnóstico
+      await db.collection('pedidos').doc(pedidoId).update({
+        emailsEnviados: resultado.emailClienteOk && resultado.emailAdminOk,
+        emailClienteEnviado: resultado.emailClienteOk || false,
+        emailAdminEnviado: resultado.emailAdminOk || false,
+        dataEnvioEmails: new Date().toISOString()
+      });
     }
 
     return res.status(200).json({ success: true });
