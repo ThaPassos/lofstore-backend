@@ -1,6 +1,6 @@
 const mercadopago = require('mercadopago');
 const admin = require('firebase-admin');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 // =================== FIREBASE ===================
 if (!admin.apps.length) {
@@ -26,42 +26,16 @@ mercadopago.configure({
   access_token: process.env.MP_ACCESS_TOKEN
 });
 
-// =================== NODEMAILER ===================
-function criarTransporter() {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_PASS
-    },
-    pool: false,
-    maxConnections: 1
-  });
-}
+// =================== RESEND ===================
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // =================== ENVIO DE E-MAILS ===================
 async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
-  console.log('📧 Iniciando envio de e-mails...');
-  console.log('   → Cliente:', pedido.cliente.email);
-  console.log('   → Admin:', process.env.ADMIN_EMAIL || 'thafinhapassos@gmail.com');
-
-  const transporter = criarTransporter();
-
-  // Verifica conexão com Gmail antes de enviar
-  try {
-    await transporter.verify();
-    console.log('✅ Conexão com Gmail OK');
-  } catch (verifyError) {
-    console.error('❌ Falha na conexão com Gmail:', verifyError.message);
-    return { success: false, message: verifyError.message };
-  }
+  console.log('📧 Iniciando envio de e-mails via Resend...');
 
   const dataFormatada = new Date(pedido.criadoEm).toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
+    day: '2-digit', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
   });
 
   const numeroPedido = pedidoId.substring(0, 8).toUpperCase();
@@ -76,7 +50,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
     </tr>
   `).join('');
 
-  // ── HTML E-MAIL CLIENTE ───────────────────────────────
+  // ── HTML E-MAIL CLIENTE ──
   const htmlCliente = `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -140,7 +114,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
 </body>
 </html>`;
 
-  // ── HTML E-MAIL ADMIN ─────────────────────────────────
+  // ── HTML E-MAIL ADMIN ──
   const htmlAdmin = `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -191,47 +165,45 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
 </body>
 </html>`;
 
-  // ── ENVIA OS E-MAILS SEPARADAMENTE ──────────────────────
   let emailClienteOk = false;
   let emailAdminOk = false;
 
   // 1️⃣ E-mail para o CLIENTE
   try {
     console.log('📤 Enviando e-mail para cliente:', pedido.cliente.email);
-    const infoCliente = await transporter.sendMail({
-      from: `"LofStore" <${process.env.GMAIL_USER}>`,
+    const { data, error } = await resend.emails.send({
+      from: 'LofStore <onboarding@resend.dev>',
       to: pedido.cliente.email,
       subject: `✅ Pedido #${numeroPedido} confirmado — LofStore`,
       html: htmlCliente
     });
-    console.log('✅ E-mail do CLIENTE enviado! MessageId:', infoCliente.messageId);
+
+    if (error) throw new Error(error.message);
+    console.log('✅ E-mail do CLIENTE enviado! ID:', data.id);
     emailClienteOk = true;
   } catch (erroCliente) {
     console.error('❌ ERRO ao enviar e-mail para CLIENTE:', erroCliente.message);
-    console.error('   Código do erro:', erroCliente.code);
-    console.error('   Destinatário:', pedido.cliente.email);
   }
-
-  // Aguarda 2 segundos entre os envios
-  await new Promise(r => setTimeout(r, 2000));
 
   // 2️⃣ E-mail para o ADMIN
   try {
     const adminEmail = process.env.ADMIN_EMAIL || 'thafinhapassos@gmail.com';
     console.log('📤 Enviando e-mail para admin:', adminEmail);
-    const infoAdmin = await transporter.sendMail({
-      from: `"Sistema LofStore" <${process.env.GMAIL_USER}>`,
+    const { data, error } = await resend.emails.send({
+      from: 'Sistema LofStore <onboarding@resend.dev>',
       to: adminEmail,
       subject: `🛒 Novo pedido aprovado #${numeroPedido}`,
       html: htmlAdmin
     });
-    console.log('✅ E-mail do ADMIN enviado! MessageId:', infoAdmin.messageId);
+
+    if (error) throw new Error(error.message);
+    console.log('✅ E-mail do ADMIN enviado! ID:', data.id);
     emailAdminOk = true;
   } catch (erroAdmin) {
     console.error('❌ ERRO ao enviar e-mail para ADMIN:', erroAdmin.message);
   }
 
-  console.log(`📊 Resultado final: cliente=${emailClienteOk} | admin=${emailAdminOk}`);
+  console.log(`📊 Resultado: cliente=${emailClienteOk} | admin=${emailAdminOk}`);
   return { success: emailClienteOk || emailAdminOk, emailClienteOk, emailAdminOk };
 }
 
@@ -256,7 +228,7 @@ module.exports = async (req, res) => {
     const pagamentoId = data?.id || req.query?.['data.id'];
 
     if (type !== 'payment' || !pagamentoId) {
-      console.log('Notificação ignorada (não é pagamento ou sem ID)');
+      console.log('Notificação ignorada');
       return res.status(200).json({ success: true, message: 'Ignorado' });
     }
 
@@ -269,7 +241,6 @@ module.exports = async (req, res) => {
     console.log(`Pagamento ${pagamentoId} — status: ${status} — pedido: ${pedidoId}`);
 
     if (!pedidoId) {
-      console.error('external_reference não encontrado no pagamento');
       return res.status(200).json({ success: true, message: 'Sem pedidoId' });
     }
 
@@ -284,7 +255,6 @@ module.exports = async (req, res) => {
 
     const pedidoDoc = await db.collection('pedidos').doc(pedidoId).get();
     if (!pedidoDoc.exists) {
-      console.error('Pedido não encontrado:', pedidoId);
       return res.status(404).json({ error: 'Pedido não encontrado' });
     }
 
@@ -303,12 +273,9 @@ module.exports = async (req, res) => {
       }
     });
 
-    console.log(`Pedido ${pedidoId} → ${statusPedido}`);
-
     if (status === 'approved' && !pedidoDados.emailsEnviados) {
       const resultado = await enviarEmailsPagamentoAprovado(pedidoDados, pedidoId);
 
-      // Salva resultado detalhado no Firebase para diagnóstico
       await db.collection('pedidos').doc(pedidoId).update({
         emailsEnviados: resultado.emailClienteOk && resultado.emailAdminOk,
         emailClienteEnviado: resultado.emailClienteOk || false,
