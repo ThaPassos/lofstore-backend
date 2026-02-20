@@ -1,6 +1,6 @@
 const mercadopago = require('mercadopago');
 const admin = require('firebase-admin');
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
 // =================== FIREBASE ===================
 if (!admin.apps.length) {
@@ -26,12 +26,22 @@ mercadopago.configure({
   access_token: process.env.MP_ACCESS_TOKEN
 });
 
-// =================== RESEND ===================
-const resend = new Resend(process.env.RESEND_API_KEY);
+// =================== NODEMAILER (GMAIL) ===================
+function criarTransporter() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_PASS  // Senha de app do Google
+    }
+  });
+}
 
 // =================== ENVIO DE E-MAILS ===================
 async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
-  console.log('📧 Iniciando envio de e-mails via Resend...');
+  console.log('📧 Iniciando envio de e-mails via Gmail/Nodemailer...');
+
+  const transporter = criarTransporter();
 
   const dataFormatada = new Date(pedido.criadoEm).toLocaleDateString('pt-BR', {
     day: '2-digit', month: 'long', year: 'numeric',
@@ -171,15 +181,13 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
   // 1️⃣ E-mail para o CLIENTE
   try {
     console.log('📤 Enviando e-mail para cliente:', pedido.cliente.email);
-    const { data, error } = await resend.emails.send({
-      from: 'LofStore <onboarding@resend.dev>',
+    await transporter.sendMail({
+      from: `"LofStore" <${process.env.GMAIL_USER}>`,
       to: pedido.cliente.email,
       subject: `✅ Pedido #${numeroPedido} confirmado — LofStore`,
       html: htmlCliente
     });
-
-    if (error) throw new Error(error.message);
-    console.log('✅ E-mail do CLIENTE enviado! ID:', data.id);
+    console.log('✅ E-mail do CLIENTE enviado!');
     emailClienteOk = true;
   } catch (erroCliente) {
     console.error('❌ ERRO ao enviar e-mail para CLIENTE:', erroCliente.message);
@@ -187,17 +195,15 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
 
   // 2️⃣ E-mail para o ADMIN
   try {
-    const adminEmail = process.env.ADMIN_EMAIL || 'thafinhapassos@gmail.com';
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.GMAIL_USER;
     console.log('📤 Enviando e-mail para admin:', adminEmail);
-    const { data, error } = await resend.emails.send({
-      from: 'Sistema LofStore <onboarding@resend.dev>',
+    await transporter.sendMail({
+      from: `"Sistema LofStore" <${process.env.GMAIL_USER}>`,
       to: adminEmail,
       subject: `🛒 Novo pedido aprovado #${numeroPedido}`,
       html: htmlAdmin
     });
-
-    if (error) throw new Error(error.message);
-    console.log('✅ E-mail do ADMIN enviado! ID:', data.id);
+    console.log('✅ E-mail do ADMIN enviado!');
     emailAdminOk = true;
   } catch (erroAdmin) {
     console.error('❌ ERRO ao enviar e-mail para ADMIN:', erroAdmin.message);
