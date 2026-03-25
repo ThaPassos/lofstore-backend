@@ -1,4 +1,3 @@
-const mercadopago = require('mercadopago');
 const admin = require('firebase-admin');
 const nodemailer = require('nodemailer');
 
@@ -21,18 +20,13 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-// =================== MERCADO PAGO ===================
-mercadopago.configure({
-  access_token: process.env.MP_ACCESS_TOKEN
-});
-
 // =================== NODEMAILER (GMAIL) ===================
 function criarTransporter() {
   return nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_PASS  // Senha de app do Google
+      pass: process.env.GMAIL_PASS
     }
   });
 }
@@ -136,7 +130,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
     </div>
     <div style="padding:30px;">
       <p style="background:#d4edda;color:#155724;padding:12px 16px;border-radius:6px;font-weight:600;margin-top:0;">
-        ✅ Pedido <strong>#${numeroPedido}</strong> — Pagamento APROVADO
+        ✅ Pedido <strong>#${numeroPedido}</strong> — Pagamento APROVADO via InfinitePay
       </p>
 
       <h3 style="color:#333;border-bottom:2px solid #eee;padding-bottom:8px;">👤 Dados do Cliente</h3>
@@ -178,7 +172,6 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
   let emailClienteOk = false;
   let emailAdminOk = false;
 
-  // 1️⃣ E-mail para o CLIENTE
   try {
     console.log('📤 Enviando e-mail para cliente:', pedido.cliente.email);
     await transporter.sendMail({
@@ -193,7 +186,6 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
     console.error('❌ ERRO ao enviar e-mail para CLIENTE:', erroCliente.message);
   }
 
-  // 2️⃣ E-mail para o ADMIN
   try {
     const adminEmail = process.env.ADMIN_EMAIL || process.env.GMAIL_USER;
     console.log('📤 Enviando e-mail para admin:', adminEmail);
@@ -215,7 +207,7 @@ async function enviarEmailsPagamentoAprovado(pedido, pedidoId) {
 
 // =================== WEBHOOK PRINCIPAL ===================
 module.exports = async (req, res) => {
-  console.log('📨 Webhook recebido do Mercado Pago');
+  console.log('📨 Webhook recebido do InfinitePay');
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -226,60 +218,84 @@ module.exports = async (req, res) => {
 
   try {
     const body = req.body || {};
-    const { type, data } = body;
 
-    console.log('Tipo:', type);
-    console.log('Dados:', JSON.stringify(data));
+    console.log('📥 Body do webhook InfinitePay:', JSON.stringify(body, null, 2));
 
-    const pagamentoId = data?.id || req.query?.['data.id'];
+    // =================== INTERPRETAÇÃO DO WEBHOOK INFINITEPAY ===================
+    // O InfinitePay envia o evento no campo "event" ou "type"
+    // e os dados do pagamento no campo "data" ou "payment"
+    const evento = body.event || body.type || '';
+    const dadosPagamento = body.data || body.payment || body;
 
-    if (type !== 'payment' || !pagamentoId) {
-      console.log('Notificação ignorada');
-      return res.status(200).json({ success: true, message: 'Ignorado' });
-    }
+    // O pedidoId foi salvo como external_reference na criação do link
+    const pedidoId = dadosPagamento.external_reference
+      || dadosPagamento.order_id
+      || dadosPagamento.metadata?.pedido_id
+      || null;
 
-    console.log('Consultando pagamento:', pagamentoId);
-    const pagamento = await mercadopago.payment.findById(pagamentoId);
+    // Status do pagamento vindo do InfinitePay
+    const statusInfinitePay = dadosPagamento.status || dadosPagamento.payment_status || '';
 
-    const pedidoId = pagamento.body.external_reference;
-    const status = pagamento.body.status;
+    console.log(`📌 Evento: ${evento} | Status: ${statusInfinitePay} | Pedido: ${pedidoId}`);
 
-    console.log(`Pagamento ${pagamentoId} — status: ${status} — pedido: ${pedidoId}`);
-
+    // Ignora eventos que não são de pagamento
     if (!pedidoId) {
-      return res.status(200).json({ success: true, message: 'Sem pedidoId' });
+      console.log('⚠️ Webhook sem pedidoId — ignorado');
+      return res.status(200).json({ success: true, message: 'Ignorado — sem pedidoId' });
     }
 
+    // Mapeia status do InfinitePay para status interno do sistema
+    // Referência: https://developers.infinitepay.io/docs/webhooks
     const statusMap = {
-      approved: 'pago',
-      pending: 'pendente',
-      in_process: 'pendente',
-      rejected: 'cancelado',
-      cancelled: 'cancelado'
+      // Status de aprovação
+      'approved': 'pago',
+      'paid': 'pago',
+      'captured': 'pago',
+      'succeeded': 'pago',
+      // Status de pendência
+      'pending': 'pendente',
+      'waiting_payment': 'pendente',
+      'processing': 'pendente',
+      'in_process': 'pendente',
+      // Status de falha/cancelamento
+      'failed': 'cancelado',
+      'cancelled': 'cancelado',
+      'canceled': 'cancelado',
+      'rejected': 'cancelado',
+      'expired': 'cancelado',
+      'refunded': 'cancelado'
     };
-    const statusPedido = statusMap[status] || 'aguardando';
 
+    const statusPedido = statusMap[statusInfinitePay.toLowerCase()] || 'aguardando';
+
+    // Busca o pedido no Firebase
     const pedidoDoc = await db.collection('pedidos').doc(pedidoId).get();
     if (!pedidoDoc.exists) {
+      console.error('❌ Pedido não encontrado no Firebase:', pedidoId);
       return res.status(404).json({ error: 'Pedido não encontrado' });
     }
 
     const pedidoDados = pedidoDoc.data();
 
+    // Atualiza o pedido no Firebase
     await db.collection('pedidos').doc(pedidoId).update({
       statusPagamento: statusPedido,
-      mercadoPagoStatus: status,
+      infinitePayStatus: statusInfinitePay,
       pagamentoAtualizado: new Date().toISOString(),
       dadosPagamento: {
-        id: pagamento.body.id,
-        status,
-        metodoPagamento: pagamento.body.payment_method_id,
-        valorPago: pagamento.body.transaction_amount,
-        dataAprovacao: pagamento.body.date_approved || null
+        id: dadosPagamento.id || '',
+        status: statusInfinitePay,
+        metodoPagamento: dadosPagamento.payment_method || dadosPagamento.method || '',
+        valorPago: dadosPagamento.amount ? dadosPagamento.amount / 100 : pedidoDados.total,
+        dataAprovacao: dadosPagamento.paid_at || dadosPagamento.captured_at || null
       }
     });
 
-    if (status === 'approved' && !pedidoDados.emailsEnviados) {
+    console.log(`✅ Pedido ${pedidoId} atualizado para: ${statusPedido}`);
+
+    // Envia e-mails apenas quando pagamento for aprovado e ainda não enviou
+    if (statusPedido === 'pago' && !pedidoDados.emailsEnviados) {
+      console.log('💌 Pagamento aprovado — enviando e-mails...');
       const resultado = await enviarEmailsPagamentoAprovado(pedidoDados, pedidoId);
 
       await db.collection('pedidos').doc(pedidoId).update({
@@ -294,6 +310,7 @@ module.exports = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Erro no webhook:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    // Retorna 200 mesmo com erro para o InfinitePay não ficar reenviando
+    return res.status(200).json({ success: false, error: error.message });
   }
 };
