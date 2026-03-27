@@ -24,26 +24,23 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-// =================== CRIAR PAGAMENTO INFINITEPAY ===================
+// =================== FUNÇÃO ===================
 module.exports = async (req, res) => {
 
-  // CORS
+  // =================== CORS ===================
   const allowedOrigins = [
     'https://lofstore.com.br',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000'
+    'http://localhost:3000'
   ];
 
   const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
+  res.setHeader(
+    'Access-Control-Allow-Origin',
+    allowedOrigins.includes(origin) ? origin : '*'
+  );
 
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
@@ -51,73 +48,71 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { pedidoId, itens, total, cliente } = req.body;
+    const { pedidoId, itens, cliente } = req.body;
 
-    console.log('📦 Criando link de pagamento InfinitePay para pedido:', pedidoId);
-    console.log('📦 Body recebido:', JSON.stringify(req.body, null, 2));
+    console.log('📦 Pedido:', pedidoId);
+    console.log('📦 Body:', JSON.stringify(req.body, null, 2));
 
-    // Validações
+    // =================== VALIDAÇÕES ===================
     if (!pedidoId || !itens || !cliente) {
-      return res.status(400).json({ success: false, message: 'Dados incompletos' });
+      throw new Error('Dados incompletos');
     }
 
     if (!Array.isArray(itens) || itens.length === 0) {
-      return res.status(400).json({ success: false, message: 'Carrinho vazio' });
+      throw new Error('Carrinho vazio');
     }
 
-    // Handle: valor da variável INFINITEPAY_API_KEY na Vercel (ex: "lofstore")
+    // =================== HANDLE ===================
     const handle = process.env.INFINITEPAY_API_KEY;
 
     if (!handle) {
-      throw new Error('INFINITEPAY_API_KEY não configurada na Vercel');
+      throw new Error('Handle da InfinitePay não configurado');
     }
 
-    console.log('🏷️ Handle InfinitePay:', handle);
+    console.log('🏷️ Handle:', handle);
 
     // =================== ITENS ===================
-    // Garante que price é número inteiro em centavos e >= 1
     const itensMapeados = itens.map(item => {
       const quantidade = Math.max(1, parseInt(item.quantidade) || 1);
-      const precoUnitario = parseFloat(item.preco) || 0;
-      const precoEmCentavos = Math.round(precoUnitario * 100);
+      const preco = Math.round((parseFloat(item.preco) || 0) * 100);
 
-      if (precoEmCentavos < 1) {
-        throw new Error(`Preço inválido para o item "${item.nome}": R$ ${precoUnitario}`);
+      if (preco < 1) {
+        throw new Error(`Preço inválido: ${item.nome}`);
       }
 
       return {
         quantity: quantidade,
-        price: precoEmCentavos,
-        description: String(item.nome).substring(0, 100) // máx 100 chars
+        price: preco,
+        description: String(item.nome || 'Produto').substring(0, 100)
       };
     });
 
-    console.log('🛒 Itens mapeados:', JSON.stringify(itensMapeados, null, 2));
+    // =================== EMAIL ===================
+    let email = cliente.email;
 
-    // =================== TELEFONE ===================
-    // Remove tudo que não for dígito e garante formato correto
-    const telefoneLimpo = String(cliente.telefone || '')
-      .replace(/\D/g, '')
-      .replace(/^0/, ''); // remove zero à esquerda se houver
-
-    // InfinitePay espera E.164: +55XXXXXXXXXXX (12 ou 13 dígitos com 55)
-    let telefoneFormatado;
-    if (telefoneLimpo.startsWith('55') && telefoneLimpo.length >= 12) {
-      telefoneFormatado = `+${telefoneLimpo}`;
-    } else if (telefoneLimpo.length === 11 || telefoneLimpo.length === 10) {
-      telefoneFormatado = `+55${telefoneLimpo}`;
-    } else {
-      // Fallback: usa o que tem ou um número fictício para não quebrar
-      telefoneFormatado = `+55${telefoneLimpo.padEnd(11, '0').substring(0, 11)}`;
+    if (!email || !email.includes('@')) {
+      console.log('⚠️ Email inválido, usando fallback');
+      email = 'teste@teste.com';
     }
 
-    console.log('📱 Telefone formatado:', telefoneFormatado);
+    // =================== TELEFONE ===================
+    let telefone = String(cliente.telefone || '').replace(/\D/g, '');
+
+    if (telefone.length === 10 || telefone.length === 11) {
+      telefone = `+55${telefone}`;
+    } else if (!telefone.startsWith('55')) {
+      telefone = '+5511999999999';
+    } else {
+      telefone = `+${telefone}`;
+    }
+
+    console.log('📱 Telefone final:', telefone);
 
     // =================== URLS ===================
     const frontendUrl = process.env.FRONTEND_URL || 'https://lofstore.com.br';
     const backendUrl = process.env.BACKEND_URL || 'https://lofstore-backend.vercel.app';
 
-    // =================== PAYLOAD INFINITEPAY ===================
+    // =================== PAYLOAD ===================
     const payload = {
       handle: handle,
       order_nsu: pedidoId,
@@ -125,73 +120,63 @@ module.exports = async (req, res) => {
       webhook_url: `${backendUrl}/webhook`,
       items: itensMapeados,
       customer: {
-        name: String(cliente.nome || 'Cliente').substring(0, 100),
-        email: String(cliente.email || ''),
-        phone_number: telefoneFormatado
+        name: String(cliente.nome || 'Cliente'),
+        email: email,
+        phone_number: telefone
       }
     };
 
-    console.log('📤 Payload final para InfinitePay:', JSON.stringify(payload, null, 2));
+    console.log('🚨 PAYLOAD FINAL:', JSON.stringify(payload, null, 2));
 
-    // =================== CHAMADA À API ===================
+    // =================== REQUEST ===================
     const response = await fetch('https://api.infinitepay.io/invoices/public/checkout/links', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    const responseText = await response.text();
-    console.log('📥 Status HTTP InfinitePay:', response.status);
-    console.log('📥 Resposta bruta InfinitePay:', responseText);
+    const text = await response.text();
 
-    if (!responseText || responseText.trim() === '') {
-      throw new Error('InfinitePay retornou resposta vazia. Verifique sua InfiniteTag.');
-    }
+    console.log('📥 Status:', response.status);
+    console.log('📥 Resposta:', text);
 
     let data;
     try {
-      data = JSON.parse(responseText);
-    } catch (parseError) {
-      throw new Error(`Resposta inválida da InfinitePay: ${responseText}`);
+      data = JSON.parse(text);
+    } catch {
+      throw new Error('Resposta inválida da InfinitePay');
     }
-
-    console.log('📥 Resposta InfinitePay parsed:', JSON.stringify(data, null, 2));
 
     if (!response.ok) {
-      throw new Error(data.message || data.error || `Erro HTTP ${response.status}: ${JSON.stringify(data)}`);
+      throw new Error(data.message || 'Erro ao criar pagamento');
     }
 
-    const linkPagamento = data.url || data.checkout_url || data.link;
+    const link = data.url || data.checkout_url || data.link;
 
-    if (!linkPagamento) {
-      throw new Error(`InfinitePay não retornou link. Resposta: ${JSON.stringify(data)}`);
+    if (!link) {
+      throw new Error('Link não retornado');
     }
 
-    // Atualiza pedido no Firebase
+    // =================== FIREBASE ===================
     await db.collection('pedidos').doc(pedidoId).update({
-      infinitePayOrderNsu: pedidoId,
-      infinitePaySlug: data.slug || data.invoice_slug || '',
-      linkPagamento: linkPagamento,
+      linkPagamento: link,
       statusPagamento: 'aguardando',
       atualizadoEm: new Date().toISOString()
     });
 
-    console.log('✅ Link de pagamento criado:', linkPagamento);
+    console.log('✅ Link criado:', link);
 
     return res.json({
       success: true,
-      link: linkPagamento,
-      orderNsu: pedidoId
+      link
     });
 
   } catch (error) {
-    console.error('❌ Erro ao criar pagamento:', error);
+    console.error('❌ ERRO:', error);
+
     return res.status(500).json({
       success: false,
-      message: error.message,
-      detalhes: error.stack
+      message: error.message
     });
   }
 };
