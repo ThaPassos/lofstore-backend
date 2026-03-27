@@ -54,6 +54,7 @@ module.exports = async (req, res) => {
     const { pedidoId, itens, total, cliente } = req.body;
 
     console.log('📦 Criando link de pagamento InfinitePay para pedido:', pedidoId);
+    console.log('📦 Body recebido:', JSON.stringify(req.body, null, 2));
 
     // Validações
     if (!pedidoId || !itens || !cliente) {
@@ -64,43 +65,75 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Carrinho vazio' });
     }
 
-    // InfiniteTag sem o $ (variável INFINITEPAY_API_KEY na Vercel)
-    // Ex: se sua tag é $lofstore, o valor deve ser: lofstore
+    // Handle: valor da variável INFINITEPAY_API_KEY na Vercel (ex: "lofstore")
     const handle = process.env.INFINITEPAY_API_KEY;
 
     if (!handle) {
       throw new Error('INFINITEPAY_API_KEY não configurada na Vercel');
     }
 
-    // Monta os itens no formato do InfinitePay (preço em centavos)
-    const itensMapeados = itens.map(item => ({
-      quantity: Number(item.quantidade || 1),
-      price: Math.round(Number(item.preco) * 100), // InfinitePay usa centavos
-      description: item.nome
-    }));
+    console.log('🏷️ Handle InfinitePay:', handle);
 
-    // order_nsu é o identificador do pedido no seu sistema
-    // Usamos o pedidoId do Firebase para rastrear no webhook
-    const orderNsu = pedidoId;
+    // =================== ITENS ===================
+    // Garante que price é número inteiro em centavos e >= 1
+    const itensMapeados = itens.map(item => {
+      const quantidade = Math.max(1, parseInt(item.quantidade) || 1);
+      const precoUnitario = parseFloat(item.preco) || 0;
+      const precoEmCentavos = Math.round(precoUnitario * 100);
 
-    // =================== PAYLOAD DA API INFINITEPAY ===================
-    // Documentação: https://ajuda.infinitepay.io/pt-BR/articles/10766888
+      if (precoEmCentavos < 1) {
+        throw new Error(`Preço inválido para o item "${item.nome}": R$ ${precoUnitario}`);
+      }
+
+      return {
+        quantity: quantidade,
+        price: precoEmCentavos,
+        description: String(item.nome).substring(0, 100) // máx 100 chars
+      };
+    });
+
+    console.log('🛒 Itens mapeados:', JSON.stringify(itensMapeados, null, 2));
+
+    // =================== TELEFONE ===================
+    // Remove tudo que não for dígito e garante formato correto
+    const telefoneLimpo = String(cliente.telefone || '')
+      .replace(/\D/g, '')
+      .replace(/^0/, ''); // remove zero à esquerda se houver
+
+    // InfinitePay espera E.164: +55XXXXXXXXXXX (12 ou 13 dígitos com 55)
+    let telefoneFormatado;
+    if (telefoneLimpo.startsWith('55') && telefoneLimpo.length >= 12) {
+      telefoneFormatado = `+${telefoneLimpo}`;
+    } else if (telefoneLimpo.length === 11 || telefoneLimpo.length === 10) {
+      telefoneFormatado = `+55${telefoneLimpo}`;
+    } else {
+      // Fallback: usa o que tem ou um número fictício para não quebrar
+      telefoneFormatado = `+55${telefoneLimpo.padEnd(11, '0').substring(0, 11)}`;
+    }
+
+    console.log('📱 Telefone formatado:', telefoneFormatado);
+
+    // =================== URLS ===================
+    const frontendUrl = process.env.FRONTEND_URL || 'https://lofstore.com.br';
+    const backendUrl = process.env.BACKEND_URL || 'https://lofstore-backend.vercel.app';
+
+    // =================== PAYLOAD INFINITEPAY ===================
     const payload = {
-      handle: handle,        // sua InfiniteTag sem o $
-      order_nsu: orderNsu,   // ID do pedido — retorna no webhook
-      redirect_url: `${process.env.FRONTEND_URL}/pagamento-sucesso.html?pedido=${pedidoId}`,
-      webhook_url: `${process.env.BACKEND_URL}/webhook`,
+      handle: handle,
+      order_nsu: pedidoId,
+      redirect_url: `${frontendUrl}/pagamento-sucesso.html?pedido=${pedidoId}`,
+      webhook_url: `${backendUrl}/webhook`,
       items: itensMapeados,
       customer: {
-        name: cliente.nome,
-        email: cliente.email,
-        phone_number: `+55${String(cliente.telefone || '').replace(/\D/g, '')}`
+        name: String(cliente.nome || 'Cliente').substring(0, 100),
+        email: String(cliente.email || ''),
+        phone_number: telefoneFormatado
       }
     };
 
-    console.log('📤 Enviando para InfinitePay:', JSON.stringify(payload, null, 2));
+    console.log('📤 Payload final para InfinitePay:', JSON.stringify(payload, null, 2));
 
-    // API pública do InfinitePay — não precisa de token de autorização
+    // =================== CHAMADA À API ===================
     const response = await fetch('https://api.infinitepay.io/invoices/public/checkout/links', {
       method: 'POST',
       headers: {
@@ -109,31 +142,36 @@ module.exports = async (req, res) => {
       body: JSON.stringify(payload)
     });
 
-    // Lê como texto primeiro para evitar crash em resposta vazia
     const responseText = await response.text();
+    console.log('📥 Status HTTP InfinitePay:', response.status);
     console.log('📥 Resposta bruta InfinitePay:', responseText);
 
     if (!responseText || responseText.trim() === '') {
       throw new Error('InfinitePay retornou resposta vazia. Verifique sua InfiniteTag.');
     }
 
-    const data = JSON.parse(responseText);
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new Error(`Resposta inválida da InfinitePay: ${responseText}`);
+    }
+
     console.log('📥 Resposta InfinitePay parsed:', JSON.stringify(data, null, 2));
 
     if (!response.ok) {
       throw new Error(data.message || data.error || `Erro HTTP ${response.status}: ${JSON.stringify(data)}`);
     }
 
-    // InfinitePay retorna o link no campo "url"
     const linkPagamento = data.url || data.checkout_url || data.link;
 
     if (!linkPagamento) {
-      throw new Error(`InfinitePay não retornou link. Resposta completa: ${JSON.stringify(data)}`);
+      throw new Error(`InfinitePay não retornou link. Resposta: ${JSON.stringify(data)}`);
     }
 
-    // Atualiza pedido no Firebase com dados do InfinitePay
+    // Atualiza pedido no Firebase
     await db.collection('pedidos').doc(pedidoId).update({
-      infinitePayOrderNsu: orderNsu,
+      infinitePayOrderNsu: pedidoId,
       infinitePaySlug: data.slug || data.invoice_slug || '',
       linkPagamento: linkPagamento,
       statusPagamento: 'aguardando',
@@ -145,7 +183,7 @@ module.exports = async (req, res) => {
     return res.json({
       success: true,
       link: linkPagamento,
-      orderNsu: orderNsu
+      orderNsu: pedidoId
     });
 
   } catch (error) {
