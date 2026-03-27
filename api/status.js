@@ -24,7 +24,7 @@ module.exports = async (req, res) => {
   try {
     const pedidoId = req.url.split('/').pop();
     const pedidoDoc = await db.collection('pedidos').doc(pedidoId).get();
-    
+
     if (!pedidoDoc.exists) {
       return res.status(404).json({ error: 'Pedido não encontrado' });
     }
@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
     res.json({
       pedidoId: pedidoId,
       statusPagamento: pedido.statusPagamento || 'aguardando',
-      mercadoPagoStatus: pedido.mercadoPagoStatus || null
+      infinitePayStatus: pedido.infinitePayStatus || null
     });
 
   } catch (error) {

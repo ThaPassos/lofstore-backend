@@ -64,64 +64,77 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Carrinho vazio' });
     }
 
-    // Calcula o total com segurança
-    const totalCalculado = itens.reduce((acc, item) => {
-      return acc + (Number(item.preco) * Number(item.quantidade || 1));
-    }, 0);
+    // InfiniteTag sem o $ (variável INFINITEPAY_API_KEY na Vercel)
+    // Ex: se sua tag é $lofstore, o valor deve ser: lofstore
+    const handle = process.env.INFINITEPAY_API_KEY;
 
-    // Monta descrição dos itens
-    const descricaoItens = itens
-      .map(item => `${item.nome} (x${item.quantidade || 1})`)
-      .join(', ');
+    if (!handle) {
+      throw new Error('INFINITEPAY_API_KEY não configurada na Vercel');
+    }
 
-    // =================== CHAMADA À API INFINITEPAY ===================
-    // Documentação: https://developers.infinitepay.io
+    // Monta os itens no formato do InfinitePay (preço em centavos)
+    const itensMapeados = itens.map(item => ({
+      quantity: Number(item.quantidade || 1),
+      price: Math.round(Number(item.preco) * 100), // InfinitePay usa centavos
+      description: item.nome
+    }));
+
+    // order_nsu é o identificador do pedido no seu sistema
+    // Usamos o pedidoId do Firebase para rastrear no webhook
+    const orderNsu = pedidoId;
+
+    // =================== PAYLOAD DA API INFINITEPAY ===================
+    // Documentação: https://ajuda.infinitepay.io/pt-BR/articles/10766888
     const payload = {
-      amount: Math.round(totalCalculado * 100), // InfinitePay usa centavos
-      description: `Pedido #${pedidoId.substring(0, 8).toUpperCase()} - ${descricaoItens}`.substring(0, 200),
-      external_reference: pedidoId, // ID do pedido no Firebase — usado no webhook
+      handle: handle,        // sua InfiniteTag sem o $
+      order_nsu: orderNsu,   // ID do pedido — retorna no webhook
+      redirect_url: `${process.env.FRONTEND_URL}/pagamento-sucesso.html?pedido=${pedidoId}`,
+      webhook_url: `${process.env.BACKEND_URL}/webhook`,
+      items: itensMapeados,
       customer: {
         name: cliente.nome,
         email: cliente.email,
-        document: cliente.cpf || '', // CPF opcional — preencha se tiver
-        phone: String(cliente.telefone || '').replace(/\D/g, '')
-      },
-      payment_methods: ['credit', 'debit', 'pix'], // aceita todos os métodos
-      expires_in: 1440, // link expira em 24h (em minutos)
-      notification_url: `${process.env.BACKEND_URL}/webhook`, // webhook InfinitePay
-      success_url: `${process.env.FRONTEND_URL}/pagamento-sucesso.html?pedido=${pedidoId}`,
-      failure_url: `${process.env.FRONTEND_URL}/pagamento-falha.html`
+        phone_number: `+55${String(cliente.telefone || '').replace(/\D/g, '')}`
+      }
     };
 
     console.log('📤 Enviando para InfinitePay:', JSON.stringify(payload, null, 2));
 
-    const response = await fetch('https://api.infinitepay.io/v2/payment_links', {
+    // API pública do InfinitePay — não precisa de token de autorização
+    const response = await fetch('https://api.infinitepay.io/invoices/public/checkout/links', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.INFINITEPAY_API_KEY}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    // Lê como texto primeiro para evitar crash em resposta vazia
+    const responseText = await response.text();
+    console.log('📥 Resposta bruta InfinitePay:', responseText);
 
-    console.log('📥 Resposta InfinitePay:', JSON.stringify(data, null, 2));
+    if (!responseText || responseText.trim() === '') {
+      throw new Error('InfinitePay retornou resposta vazia. Verifique sua InfiniteTag.');
+    }
+
+    const data = JSON.parse(responseText);
+    console.log('📥 Resposta InfinitePay parsed:', JSON.stringify(data, null, 2));
 
     if (!response.ok) {
-      throw new Error(data.message || data.error || `Erro InfinitePay: ${response.status}`);
+      throw new Error(data.message || data.error || `Erro HTTP ${response.status}: ${JSON.stringify(data)}`);
     }
 
-    // Pega o link de pagamento retornado
-    const linkPagamento = data.url || data.payment_url || data.link;
+    // InfinitePay retorna o link no campo "url"
+    const linkPagamento = data.url || data.checkout_url || data.link;
 
     if (!linkPagamento) {
-      throw new Error('InfinitePay não retornou um link de pagamento válido');
+      throw new Error(`InfinitePay não retornou link. Resposta completa: ${JSON.stringify(data)}`);
     }
 
-    // Atualiza pedido no Firebase com os dados do InfinitePay
+    // Atualiza pedido no Firebase com dados do InfinitePay
     await db.collection('pedidos').doc(pedidoId).update({
-      infinitePayId: data.id,
+      infinitePayOrderNsu: orderNsu,
+      infinitePaySlug: data.slug || data.invoice_slug || '',
       linkPagamento: linkPagamento,
       statusPagamento: 'aguardando',
       atualizadoEm: new Date().toISOString()
@@ -132,7 +145,7 @@ module.exports = async (req, res) => {
     return res.json({
       success: true,
       link: linkPagamento,
-      paymentId: data.id
+      orderNsu: orderNsu
     });
 
   } catch (error) {
